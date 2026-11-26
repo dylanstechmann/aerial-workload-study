@@ -87,5 +87,59 @@ class DependencyTests(unittest.TestCase):
                     audit({**self.delivery, "jobs": jobs}, as_of=0)
 
 
+class DelayedEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        path = Path(__file__).with_name("handoffs-with-delayed-evidence.json")
+        self.scenario, = json.loads(path.read_text(encoding="utf-8"))["scenarios"]
+
+    def test_receipt_visibility_and_dependency_review_at_boundaries(self):
+        before = audit(self.scenario, as_of=27)["jobs"][0]
+        self.assertIsNone(before["completed_minute"])
+        self.assertIsNone(before["evidence_recorded"])
+        self.assertNotIn("evidence_minute", before)
+
+        at_completion = audit(self.scenario, as_of=28)["jobs"][0]
+        self.assertEqual(at_completion["status"], "unconfirmed")
+        self.assertFalse(at_completion["evidence_recorded"])
+        self.assertNotIn("evidence_minute", at_completion)
+
+        before_receipt = audit(self.scenario, as_of=41)
+        self.assertEqual(before_receipt["review_queue"], ["depot-transfer", "recipient-delivery"])
+        self.assertEqual(before_receipt["dependency_issues"], [{
+            "job_id": "recipient-delivery", "prerequisite_id": "depot-transfer",
+            "reason": "unconfirmed_prerequisite",
+        }])
+        self.assertNotIn("evidence_minute", before_receipt["jobs"][0])
+        confirmed = audit(self.scenario, as_of=42)
+        self.assertEqual(confirmed["review_queue"], [])
+        self.assertEqual(confirmed["dependency_issues"], [])
+        self.assertEqual(confirmed["summary"]["confirmed_on_time"], 2)
+        self.assertEqual(confirmed["jobs"][0]["evidence_minute"], 42)
+        self.assertNotIn("evidence_minute", confirmed["jobs"][1])
+        self.assertEqual(confirmed["jobs"], audit(self.scenario)["jobs"])
+
+    def test_receipt_cannot_fix_out_of_order_completion(self):
+        transfer, delivery = self.scenario["handoffs"]
+        scenario = {**self.scenario, "handoffs": [{**transfer, "completed_minute": 40}, delivery]}
+        for cutoff in (41, 42, None):
+            with self.subTest(cutoff=cutoff):
+                result = audit(scenario, as_of=cutoff)
+                self.assertEqual(result["dependency_issues"][0]["reason"], "handoff_before_prerequisite")
+
+    def test_evidence_minute_validation_includes_future_records(self):
+        transfer, delivery = self.scenario["handoffs"]
+        for stamp, flag in ((27, True), (10081, True), (True, True), (42.0, True),
+                            (None, True), (42, False)):
+            with self.subTest(stamp=stamp, flag=flag):
+                changed = {**transfer, "evidence_minute": stamp, "evidence_recorded": flag}
+                with self.assertRaisesRegex(ValueError, "evidence_minute"):
+                    audit({**self.scenario, "handoffs": [changed, delivery]}, as_of=0)
+
+        on_completion = {**transfer, "evidence_minute": 28}
+        result = audit({**self.scenario, "handoffs": [on_completion, delivery]}, as_of=28)
+        self.assertTrue(result["jobs"][0]["evidence_recorded"])
+        self.assertEqual(result["jobs"][0]["evidence_minute"], 28)
+
+
 if __name__ == "__main__":
     unittest.main()
