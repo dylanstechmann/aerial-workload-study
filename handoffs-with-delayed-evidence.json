@@ -1,0 +1,16 @@
+{
+  "schema": "synthetic-aerial-handoffs/1",
+  "scenarios": [
+    {
+      "id": "parcel-receipts",
+      "jobs": [
+        {"id": "depot-transfer", "ready_minute": 0, "due_minute": 30},
+        {"id": "recipient-delivery", "ready_minute": 20, "due_minute": 35, "depends_on": ["depot-transfer"]}
+      ],
+      "handoffs": [
+        {"job_id": "depot-transfer", "completed_minute": 28, "evidence_recorded": true, "evidence_minute": 42},
+        {"job_id": "recipient-delivery", "completed_minute": 35, "evidence_recorded": true}
+      ]
+    }
+  ]
+}

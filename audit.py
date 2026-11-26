@@ -83,6 +83,7 @@ def audit(scenario, *, as_of=None):
         check_dependencies(dependencies, windows)
 
     records = {}
+    visible_evidence_minutes = {}
     for record in scenario["handoffs"]:
         job_id = identifier(record["job_id"], "handoff job ID")
         if job_id not in windows or job_id in records:
@@ -93,6 +94,15 @@ def audit(scenario, *, as_of=None):
         evidence = record["evidence_recorded"]
         if type(evidence) is not bool:
             raise ValueError(f"{job_id}: evidence_recorded must be a boolean")
+        if "evidence_minute" in record:
+            if not evidence:
+                raise ValueError(f"{job_id}: evidence_minute requires evidence_recorded to be true")
+            received = minute(record["evidence_minute"], "evidence_minute")
+            if received < timestamp:
+                raise ValueError(f"{job_id}: evidence_minute precedes completion")
+            evidence = as_of is None or received <= as_of
+            if evidence:
+                visible_evidence_minutes[job_id] = received
         records[job_id] = (timestamp, evidence)
 
     visible_records = records if as_of is None else {
@@ -120,11 +130,14 @@ def audit(scenario, *, as_of=None):
             else:
                 status = "unconfirmed"
         counts[status] += 1
-        results.append({
+        job_result = {
             "job_id": job_id, "ready_minute": ready, "due_minute": due,
             "completed_minute": timestamp, "delay_minutes": delay,
             "evidence_recorded": evidence, "status": status,
-        })
+        }
+        if job_id in visible_evidence_minutes:
+            job_result["evidence_minute"] = visible_evidence_minutes[job_id]
+        results.append(job_result)
     report = {"scenario": scenario_id, "job_count": len(results), "summary": dict(counts), "jobs": results}
     issues = audit_dependencies(dependencies, visible_records)
     if dependencies:
