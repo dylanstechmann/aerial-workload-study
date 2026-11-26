@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import subprocess
+import sys
 import unittest
 
 from audit import audit
@@ -139,6 +141,33 @@ class DelayedEvidenceTests(unittest.TestCase):
         result = audit({**self.scenario, "handoffs": [on_completion, delivery]}, as_of=28)
         self.assertTrue(result["jobs"][0]["evidence_recorded"])
         self.assertEqual(result["jobs"][0]["evidence_minute"], 28)
+
+    def test_cli_compares_review_queue_cutoffs(self):
+        folder = Path(__file__).resolve().parent
+        cli = [sys.executable, str(folder / "audit.py"), str(folder / "handoffs-with-delayed-evidence.json")]
+        for earlier, current, expected in (
+            (28, 35, {"entered": ["recipient-delivery"], "cleared": [], "still_queued": ["depot-transfer"]}),
+            (41, 42, {"entered": [], "cleared": ["depot-transfer", "recipient-delivery"], "still_queued": []}),
+        ):
+            with self.subTest(earlier=earlier, current=current):
+                report = json.loads(subprocess.check_output(
+                    cli + ["--compare-from", str(earlier), "--as-of", str(current)]
+                ))
+                self.assertEqual(report["compare_from_minute"], earlier)
+                self.assertEqual(report["as_of_minute"], current)
+                current_audit = report["audits"][0]
+                self.assertEqual(current_audit.pop("review_queue_changes"), expected)
+                self.assertEqual(current_audit, audit(self.scenario, as_of=current))
+
+        for options, message in (
+            (["--compare-from", "41"], "requires --as-of"),
+            (["--compare-from", "42", "--as-of", "41"], "at or before --as-of"),
+            (["--compare-from", "-1", "--as-of", "41"], "compare_from must be a relative integer minute"),
+        ):
+            with self.subTest(options=options):
+                invalid = subprocess.run(cli + options, capture_output=True, text=True)
+                self.assertEqual(invalid.returncode, 2)
+                self.assertIn(message, invalid.stderr)
 
 
 if __name__ == "__main__":
