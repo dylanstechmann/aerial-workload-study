@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceCommit": "0123456789abcdef0123456789abcdef01234567",
+  "sourceVersion": "synthetic-fixture-1",
+  "projectId": "BUNKER-01",
+  "constructionAuthorized": false,
+  "physicalValidationPerformed": false,
+  "readinessStatus": "BLOCKED_UNRESOLVED_HUMAN_GATES",
+  "syntheticPlanningOnly": true,
+  "unresolvedGateIds": ["BG-001", "BG-002"],
+  "schedule": {
+    "packages": [
+      {"packageId": "BW-001", "dependencies": [], "requiredGateIds": []},
+      {"packageId": "BW-002", "dependencies": ["BW-001"], "requiredGateIds": ["BG-001"]},
+      {"packageId": "BW-003", "dependencies": ["BW-002"], "requiredGateIds": ["BG-002"]}
+    ]
+  },
+  "evidenceHandoff": {
+    "schemaVersion": "1.0.0",
+    "exportType": "SYNTHETIC_EVIDENCE_HANDOFF",
+    "status": "SYNTHETIC_UNREVIEWED",
+    "constructionAuthorized": false,
+    "physicalValidationPerformed": false,
+    "humanAcceptancePerformed": false,
+    "canonicalRegisters": {
+      "workBreakdown": "projects/bunker01/construction/work-breakdown.csv",
+      "qualityGates": "projects/bunker01/construction/quality-gates.csv"
+    },
+    "workPackages": [
+      {"packageId": "BW-001", "requiredGateIds": [], "evidenceStatus": "CONCEPT_ONLY"},
+      {"packageId": "BW-002", "requiredGateIds": ["BG-001"], "evidenceStatus": "TBD"},
+      {"packageId": "BW-003", "requiredGateIds": ["BG-002"], "evidenceStatus": "TBD"}
+    ],
+    "qualityGates": [
+      {"gateId": "BG-001", "status": "UNRESOLVED"},
+      {"gateId": "BG-002", "status": "UNRESOLVED"}
+    ],
+    "notice": "Original synthetic adapter fixture; a receipt is not human review or gate closure."
+  }
+}

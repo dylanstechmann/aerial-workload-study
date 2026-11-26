@@ -1,0 +1,27 @@
+{
+  "schema": "synthetic-aerial-oce-evidence/1",
+  "scenario": "oce-context-receipts",
+  "evidence": [
+    {
+      "evidence_id": "scope-context-001",
+      "package_id": "BW-001",
+      "depends_on": [],
+      "completed_minute": 10,
+      "evidence_minute": 12
+    },
+    {
+      "evidence_id": "approval-context-001",
+      "package_id": "BW-002",
+      "depends_on": ["BW-001"],
+      "completed_minute": 20,
+      "evidence_minute": 22
+    },
+    {
+      "evidence_id": "site-context-001",
+      "package_id": "BW-003",
+      "depends_on": ["BW-002"],
+      "completed_minute": 30,
+      "evidence_minute": 34
+    }
+  ]
+}

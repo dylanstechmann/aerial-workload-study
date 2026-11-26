@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/synthetic-aerial-handoffs/1/handoffs.schema.json",
+  "title": "Synthetic aerial handoffs, schema version 1",
+  "description": "Fictional construction and delivery event logs. Evidence fields describe synthetic receipt availability only, not delivery proof, inspection acceptance, specialist sign-off, or project gate closure.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "scenarios"],
+  "properties": {
+    "schema": {
+      "const": "synthetic-aerial-handoffs/1"
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/scenario"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+      "maxLength": 40
+    },
+    "minute": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10080
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "jobs", "handoffs"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "jobs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/job"
+          }
+        },
+        "handoffs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/handoff"
+          }
+        }
+      }
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "ready_minute", "due_minute"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "ready_minute": {
+          "$ref": "#/$defs/minute"
+        },
+        "due_minute": {
+          "$ref": "#/$defs/minute"
+        },
+        "depends_on": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["job_id", "completed_minute", "evidence_recorded"],
+      "properties": {
+        "job_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "completed_minute": {
+          "$ref": "#/$defs/minute"
+        },
+        "evidence_recorded": {
+          "type": "boolean"
+        },
+        "evidence_minute": {
+          "$ref": "#/$defs/minute"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["evidence_minute"]
+          },
+          "then": {
+            "properties": {
+              "evidence_recorded": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,10 +1,18 @@
+import copy
 import json
 from pathlib import Path
 import subprocess
 import sys
 import unittest
 
-from audit import audit
+from audit import SCHEMA_ID, audit, audit_document, validate_document
+
+
+FIXTURES = Path(__file__).parent
+
+
+def load_fixture(name):
+    return json.loads(FIXTURES.joinpath(name).read_text(encoding="utf-8"))
 
 
 class SnapshotTests(unittest.TestCase):
@@ -168,6 +176,109 @@ class DelayedEvidenceTests(unittest.TestCase):
                 invalid = subprocess.run(cli + options, capture_output=True, text=True)
                 self.assertEqual(invalid.returncode, 2)
                 self.assertIn(message, invalid.stderr)
+
+
+class DocumentValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.document = load_fixture("handoffs.json")
+
+    def test_all_examples_and_versioned_schema_agree(self):
+        schema = load_fixture("handoffs.schema.json")
+        self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
+        self.assertIn("/synthetic-aerial-handoffs/1/", schema["$id"])
+        self.assertEqual(schema["properties"]["schema"]["const"], SCHEMA_ID)
+        for name in (
+            "handoffs.json", "handoffs-with-dependencies.json", "handoffs-with-delayed-evidence.json",
+        ):
+            with self.subTest(name=name):
+                validate_document(load_fixture(name))
+
+    def test_malformed_top_level_structures_are_value_errors(self):
+        malformed = (
+            None, [], "document", 1, {}, {"schema": SCHEMA_ID}, {"scenarios": []},
+            {"schema": "wrong", "scenarios": self.document["scenarios"]},
+            {**self.document, "extra": True},
+            {**self.document, "scenarios": {}},
+            {**self.document, "scenarios": []},
+            {**self.document, "scenarios": [None]},
+        )
+        for value in malformed:
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    validate_document(value)
+
+    def test_malformed_nested_structures_and_unknown_fields_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "scenario must be an object"):
+            audit([])
+        for field, value in (("jobs", {}), ("handoffs", None)):
+            scenario = {**self.document["scenarios"][0], field: value}
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, "must be an array"):
+                    audit(scenario)
+        with self.assertRaisesRegex(ValueError, "no jobs"):
+            audit({**self.document["scenarios"][0], "jobs": []})
+        with self.assertRaisesRegex(ValueError, "unknown fields"):
+            audit_document({**self.document, "unexpected": []})
+        scenario = copy.deepcopy(self.document["scenarios"][0])
+        scenario["jobs"][0]["unexpected"] = True
+        with self.assertRaisesRegex(ValueError, "unknown fields"):
+            audit(scenario)
+        scenario = copy.deepcopy(self.document["scenarios"][0])
+        del scenario["handoffs"][0]["evidence_recorded"]
+        with self.assertRaisesRegex(ValueError, "required fields"):
+            audit(scenario)
+
+    def test_duplicate_and_unknown_records_are_rejected(self):
+        scenario = copy.deepcopy(self.document["scenarios"][0])
+        scenario["jobs"].append(scenario["jobs"][0])
+        with self.assertRaisesRegex(ValueError, "duplicate job"):
+            audit(scenario)
+        scenario = copy.deepcopy(self.document["scenarios"][0])
+        scenario["handoffs"].append(scenario["handoffs"][0])
+        with self.assertRaisesRegex(ValueError, "exactly once"):
+            audit(scenario)
+        scenario = copy.deepcopy(self.document["scenarios"][0])
+        scenario["handoffs"][0]["job_id"] = "unknown-job"
+        with self.assertRaisesRegex(ValueError, "known job"):
+            audit(scenario)
+        duplicated = {**self.document, "scenarios": [self.document["scenarios"][0]] * 2}
+        with self.assertRaisesRegex(ValueError, "unique scenario IDs"):
+            validate_document(duplicated)
+
+    def test_invalid_scalars_and_ready_after_due_are_rejected(self):
+        for value in (True, 1.0, -1, 10081, None, "1"):
+            with self.subTest(value=value):
+                scenario = copy.deepcopy(self.document["scenarios"][0])
+                scenario["jobs"][0]["ready_minute"] = value
+                with self.assertRaisesRegex(ValueError, "ready_minute"):
+                    audit(scenario)
+        scenario = copy.deepcopy(self.document["scenarios"][0])
+        scenario["jobs"][0]["ready_minute"] = 26
+        with self.assertRaisesRegex(ValueError, "ready minute follows"):
+            audit(scenario)
+        scenario = copy.deepcopy(self.document["scenarios"][0])
+        scenario["handoffs"][0]["evidence_recorded"] = 1
+        with self.assertRaisesRegex(ValueError, "must be a boolean"):
+            audit(scenario)
+        for cutoff in (True, -1, 10081, 1.5):
+            with self.subTest(cutoff=cutoff):
+                with self.assertRaisesRegex(ValueError, "as_of"):
+                    audit(self.document["scenarios"][0], as_of=cutoff)
+
+    def test_zero_and_10080_boundaries_are_accepted(self):
+        at_zero = {
+            "id": "zero", "jobs": [{"id": "job", "ready_minute": 0, "due_minute": 0}],
+            "handoffs": [{"job_id": "job", "completed_minute": 0, "evidence_recorded": True, "evidence_minute": 0}],
+        }
+        self.assertEqual(audit(at_zero, as_of=0)["jobs"][0]["status"], "confirmed_on_time")
+        at_maximum = {
+            "id": "maximum", "jobs": [{"id": "job", "ready_minute": 10080, "due_minute": 10080}],
+            "handoffs": [{"job_id": "job", "completed_minute": 10080, "evidence_recorded": True, "evidence_minute": 10080}],
+        }
+        document = {"schema": SCHEMA_ID, "scenarios": [at_zero, at_maximum]}
+        validate_document(document)
+        report = audit_document(document, as_of=10080)
+        self.assertEqual([job["jobs"][0]["status"] for job in report], ["confirmed_on_time", "confirmed_on_time"])
 
 
 if __name__ == "__main__":

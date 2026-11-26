@@ -8,6 +8,30 @@ from pathlib import Path
 import re
 
 
+SCHEMA_ID = "synthetic-aerial-handoffs/1"
+MAX_MINUTE = 10_080
+
+
+def object_fields(value, field, required, optional=()):
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} must be an object")
+    required = set(required)
+    allowed = required | set(optional)
+    unknown = sorted(str(key) for key in value.keys() - allowed)
+    if unknown:
+        raise ValueError(f"{field} has unknown fields: {', '.join(unknown)}")
+    missing = sorted(required - value.keys())
+    if missing:
+        raise ValueError(f"{field} is missing required fields: {', '.join(missing)}")
+    return value
+
+
+def array(value, field):
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be an array")
+    return value
+
+
 def identifier(value, field):
     if not isinstance(value, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", value):
         raise ValueError(f"{field} must be a short anonymous identifier")
@@ -15,7 +39,7 @@ def identifier(value, field):
 
 
 def minute(value, field):
-    if type(value) is not int or not 0 <= value <= 10_080:
+    if type(value) is not int or not 0 <= value <= MAX_MINUTE:
         raise ValueError(f"{field} must be a relative integer minute from 0 to 10080")
     return value
 
@@ -55,12 +79,19 @@ def audit_dependencies(dependencies, visible_records):
 
 
 def audit(scenario, *, as_of=None):
+    """Validate one scenario and return its deterministic synthetic audit report."""
+    object_fields(scenario, "scenario", ("id", "jobs", "handoffs"))
     scenario_id = identifier(scenario["id"], "scenario ID")
     if as_of is not None:
         as_of = minute(as_of, "as_of")
+    jobs = array(scenario["jobs"], f"{scenario_id}: jobs")
+    handoffs = array(scenario["handoffs"], f"{scenario_id}: handoffs")
     windows = {}
     dependencies = {}
-    for job in scenario["jobs"]:
+    for index, job in enumerate(jobs):
+        object_fields(
+            job, f"job at index {index}", ("id", "ready_minute", "due_minute"), ("depends_on",)
+        )
         job_id = identifier(job["id"], "job ID")
         if job_id in windows:
             raise ValueError(f"duplicate job: {job_id}")
@@ -84,7 +115,13 @@ def audit(scenario, *, as_of=None):
 
     records = {}
     visible_evidence_minutes = {}
-    for record in scenario["handoffs"]:
+    for index, record in enumerate(handoffs):
+        object_fields(
+            record,
+            f"handoff at index {index}",
+            ("job_id", "completed_minute", "evidence_recorded"),
+            ("evidence_minute",),
+        )
         job_id = identifier(record["job_id"], "handoff job ID")
         if job_id not in windows or job_id in records:
             raise ValueError(f"handoff must name one known job exactly once: {job_id}")
@@ -162,6 +199,25 @@ def review_queue_changes(earlier, current):
     }
 
 
+def audit_document(data, *, as_of=None):
+    """Validate a complete input document and audit each of its scenarios."""
+    object_fields(data, "document", ("schema", "scenarios"))
+    if data["schema"] != SCHEMA_ID:
+        raise ValueError(f"expected {SCHEMA_ID}")
+    scenarios = array(data["scenarios"], "scenarios")
+    if not scenarios:
+        raise ValueError("expected at least one scenario")
+    audits = [audit(scenario, as_of=as_of) for scenario in scenarios]
+    if len({report["scenario"] for report in audits}) != len(audits):
+        raise ValueError("expected unique scenario IDs")
+    return audits
+
+
+def validate_document(data):
+    """Dependency-free structural and relational validation for an input document."""
+    audit_document(data)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("log", type=Path)
@@ -178,17 +234,11 @@ def main():
             if args.compare_from > args.as_of:
                 raise ValueError("--compare-from must be at or before --as-of")
         data = json.loads(args.log.read_text(encoding="utf-8"))
-        if data["schema"] != "synthetic-aerial-handoffs/1":
-            raise ValueError("expected synthetic-aerial-handoffs/1")
-        audits = []
-        for scenario in data["scenarios"]:
-            current = audit(scenario, as_of=args.as_of)
-            if args.compare_from is not None:
+        audits = audit_document(data, as_of=args.as_of)
+        if args.compare_from is not None:
+            for scenario, current in zip(data["scenarios"], audits):
                 earlier_queue = audit(scenario, as_of=args.compare_from)["review_queue"]
                 current["review_queue_changes"] = review_queue_changes(earlier_queue, current["review_queue"])
-            audits.append(current)
-        if not audits or len({report["scenario"] for report in audits}) != len(audits):
-            raise ValueError("expected at least one scenario and unique scenario IDs")
     except (OSError, KeyError, TypeError, ValueError) as exc:
         parser.error(str(exc))
     report = {"data_kind": "synthetic", "audits": audits}
