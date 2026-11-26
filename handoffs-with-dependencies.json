@@ -1,0 +1,31 @@
+{
+  "schema": "synthetic-aerial-handoffs/1",
+  "scenarios": [
+    {
+      "id": "construction-imagery",
+      "jobs": [
+        {"id": "bw-005-context-photos", "ready_minute": 0, "due_minute": 25},
+        {"id": "bw-009-stockpile-photos", "ready_minute": 20, "due_minute": 45, "depends_on": ["bw-005-context-photos"]},
+        {"id": "bw-016-restoration-photos", "ready_minute": 30, "due_minute": 60, "depends_on": ["bw-009-stockpile-photos"]}
+      ],
+      "handoffs": [
+        {"job_id": "bw-005-context-photos", "completed_minute": 24, "evidence_recorded": true},
+        {"job_id": "bw-009-stockpile-photos", "completed_minute": 49, "evidence_recorded": true},
+        {"job_id": "bw-016-restoration-photos", "completed_minute": 46, "evidence_recorded": true}
+      ]
+    },
+    {
+      "id": "last-mile-delivery",
+      "jobs": [
+        {"id": "parcel-01", "ready_minute": 0, "due_minute": 30},
+        {"id": "parcel-02", "ready_minute": 10, "due_minute": 45, "depends_on": ["parcel-01"]},
+        {"id": "parcel-03", "ready_minute": 10, "due_minute": 55, "depends_on": ["parcel-02"]}
+      ],
+      "handoffs": [
+        {"job_id": "parcel-01", "completed_minute": 30, "evidence_recorded": true},
+        {"job_id": "parcel-02", "completed_minute": 50, "evidence_recorded": false},
+        {"job_id": "parcel-03", "completed_minute": 55, "evidence_recorded": true}
+      ]
+    }
+  ]
+}
