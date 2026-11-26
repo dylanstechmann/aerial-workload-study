@@ -152,16 +152,41 @@ def audit(scenario, *, as_of=None):
     return report
 
 
+def review_queue_changes(earlier, current):
+    earlier_ids = set(earlier)
+    current_ids = set(current)
+    return {
+        "entered": [job_id for job_id in current if job_id not in earlier_ids],
+        "cleared": [job_id for job_id in earlier if job_id not in current_ids],
+        "still_queued": [job_id for job_id in current if job_id in earlier_ids],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("log", type=Path)
     parser.add_argument("--as-of", type=int, metavar="MINUTE", help="Report handoffs visible at this relative minute")
+    parser.add_argument("--compare-from", type=int, metavar="MINUTE",
+                        help="Compare the review queue at this minute with the --as-of snapshot")
     args = parser.parse_args()
     try:
+        if args.compare_from is not None:
+            if args.as_of is None:
+                raise ValueError("--compare-from requires --as-of")
+            minute(args.compare_from, "compare_from")
+            minute(args.as_of, "as_of")
+            if args.compare_from > args.as_of:
+                raise ValueError("--compare-from must be at or before --as-of")
         data = json.loads(args.log.read_text(encoding="utf-8"))
         if data["schema"] != "synthetic-aerial-handoffs/1":
             raise ValueError("expected synthetic-aerial-handoffs/1")
-        audits = [audit(scenario, as_of=args.as_of) for scenario in data["scenarios"]]
+        audits = []
+        for scenario in data["scenarios"]:
+            current = audit(scenario, as_of=args.as_of)
+            if args.compare_from is not None:
+                earlier_queue = audit(scenario, as_of=args.compare_from)["review_queue"]
+                current["review_queue_changes"] = review_queue_changes(earlier_queue, current["review_queue"])
+            audits.append(current)
         if not audits or len({report["scenario"] for report in audits}) != len(audits):
             raise ValueError("expected at least one scenario and unique scenario IDs")
     except (OSError, KeyError, TypeError, ValueError) as exc:
@@ -169,6 +194,8 @@ def main():
     report = {"data_kind": "synthetic", "audits": audits}
     if args.as_of is not None:
         report["as_of_minute"] = args.as_of
+    if args.compare_from is not None:
+        report["compare_from_minute"] = args.compare_from
     print(json.dumps(report, indent=2))
 
 
